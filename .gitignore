@@ -1,41 +1,24 @@
-# Prerequisites
-*.d
+# PlatformIO
+.pio
+.pioenvs
+.piolibdeps
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# Arduino IDE
+*.elf
+*.bin
+*.eep
+*.hex
+*.db
 
-# Precompiled Headers
-*.gch
-*.pch
+# System
+.DS_Store
+Thumbs.db
 
-# Linker files
-*.ilk
+# IDE
+.vscode/
+.idea/
 
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# debug information files
-*.dwo
+# Build outputs
+builds/
+firmware/
+*.zip
