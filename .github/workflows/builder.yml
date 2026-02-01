@@ -1,0 +1,177 @@
+name: BARA-WiFi-Tool
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  ARDUINO_CLI_VERSION: "0.33.0"
+  ESP32_CORE_VERSION: "2.0.11"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git wget unzip
+        
+    - name: Install Arduino CLI
+      run: |
+        wget -O arduino-cli.tar.gz "https://downloads.arduino.cc/arduino-cli/arduino-cli_latest_Linux_64bit.tar.gz"
+        tar -xf arduino-cli.tar.gz
+        sudo mv arduino-cli /usr/local/bin/
+        arduino-cli version
+        
+    - name: Configure Arduino CLI
+      run: |
+        arduino-cli config init
+        arduino-cli config set library.enable_unsafe_install true
+        arduino-cli core update-index
+        
+    - name: Install ESP32 Core
+      run: |
+        arduino-cli core install esp32:esp32@${{ env.ESP32_CORE_VERSION }}
+        
+    - name: Install required libraries
+      run: |
+        arduino-cli lib install "ArduinoJson@6.21.2"
+        arduino-cli lib install "WebServer@1.0.0"
+        
+    - name: Verify sketch
+      run: |
+        arduino-cli compile --fqbn esp32:esp32:esp32 bara.ino
+        
+    - name: Build for different ESP32 variants
+      run: |
+        mkdir -p builds
+        
+        # Build for ESP32 Dev Module
+        arduino-cli compile --fqbn esp32:esp32:esp32 --build-path builds/esp32_dev bara.ino
+        
+        # Build for ESP32 WROOM
+        arduino-cli compile --fqbn esp32:esp32:esp32 --build-path builds/esp32_wroom bara.ino
+        
+        # Build for ESP32 WROVER
+        arduino-cli compile --fqbn esp32:esp32:esp32 --build-path builds/esp32_wrover bara.ino
+        
+        # Build for ESP32 S3
+        arduino-cli compile --fqbn esp32:esp32:esp32s3 --build-path builds/esp32_s3 bara.ino
+        
+    - name: Package firmware files
+      run: |
+        mkdir -p firmware
+        
+        # Copy all .bin files
+        find builds -name "*.bin" -exec cp {} firmware/ \;
+        
+        # Create manifest
+        echo "# BARA WiFi Tool Firmware" > firmware/README.md
+        echo "Version: ${{ github.sha }}" >> firmware/README.md
+        echo "Build Date: $(date)" >> firmware/README.md
+        echo "" >> firmware/README.md
+        echo "## Available Firmware Files:" >> firmware/README.md
+        ls -la firmware/*.bin | awk '{print "- " $9}' >> firmware/README.md
+        
+        # Create flashing script
+        cat > firmware/flash.sh << 'EOF'
+        #!/bin/bash
+        # BARA WiFi Tool Flashing Script
+        
+        echo "======================================"
+        echo "    BARA WiFi Tool Flashing Script    "
+        echo "======================================"
+        echo ""
+        
+        if [ -z "$1" ]; then
+            echo "Usage: ./flash.sh <PORT>"
+            echo "Example: ./flash.sh /dev/ttyUSB0"
+            echo ""
+            echo "Available firmware files:"
+            ls *.bin
+            exit 1
+        fi
+        
+        PORT=$1
+        
+        echo "Select firmware to flash:"
+        echo "1. ESP32 Dev Module"
+        echo "2. ESP32 WROOM"
+        echo "3. ESP32 WROVER"
+        echo "4. ESP32 S3"
+        echo ""
+        read -p "Enter choice (1-4): " choice
+        
+        case $choice in
+            1)
+                FIRMWARE="bara.ino.bootloader.bin"
+                ;;
+            2)
+                FIRMWARE="bara.ino.partitions.bin"
+                ;;
+            3)
+                FIRMWARE="bara.ino.bin"
+                ;;
+            4)
+                FIRMWARE="bara.ino.bootloader.bin"
+                ;;
+            *)
+                echo "Invalid choice!"
+                exit 1
+                ;;
+        esac
+        
+        if [ ! -f "$FIRMWARE" ]; then
+            echo "Firmware file not found: $FIRMWARE"
+            exit 1
+        fi
+        
+        echo ""
+        echo "Flashing $FIRMWARE to $PORT..."
+        echo "Press and hold BOOT button, then press ENTER"
+        read
+        
+        esptool.py --chip esp32 --port $PORT --baud 921600 write_flash 0x1000 $FIRMWARE
+        
+        echo ""
+        echo "Flashing complete!"
+        echo "Disconnect and reconnect ESP32 to use BARA Tool."
+        EOF
+        
+        chmod +x firmware/flash.sh
+        
+    - name: Create release archive
+      run: |
+        zip -r bara-firmware-${{ github.sha }}.zip firmware/
+        ls -la *.zip
+        
+    - name: Upload firmware artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: bara-firmware
+        path: |
+          firmware/
+          *.zip
+        
+    - name: Create GitHub Release
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          bara-firmware-${{ github.sha }}.zip
+        generate_release_notes: true
+        draft: false
+        prerelease: false
